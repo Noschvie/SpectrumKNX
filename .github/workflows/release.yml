@@ -1,13 +1,13 @@
 name: Release (Docker Build & GHCR)
 
-
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-on:
-  push:
-    tags:
-      - 'v*'
+on: []
+  # Disabled - use release-docker.yml instead of
+  # push:
+  #   tags:
+  #     - 'v*'
 
 jobs:
   build-and-push:
@@ -64,7 +64,7 @@ jobs:
   # Debian package (bundled venv, sqlite backend) — see PACKAGING.md
   build-deb:
     runs-on: ubuntu-latest
-    # Run after the release exists so the upload never races its creation
+    # Run after the release exists, so the upload never races its creation
     needs: build-and-push
     permissions:
       contents: write
