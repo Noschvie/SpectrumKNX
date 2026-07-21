@@ -10,8 +10,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Explicit lowercase image name (must match config.yaml `image:` field)
-  IMAGE_BASE: ghcr.io/${{ github.actor }}/spectrum-knx-addon
 
 jobs:
   build-and-push-addon:
@@ -36,6 +34,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Set lowercase actor name
+        id: actor
+        run: |
+          ACTOR_LOWER=$(echo "${{ github.actor }}" | tr '[:upper:]' '[:lower:]')
+          echo "name=$ACTOR_LOWER" >> "$GITHUB_OUTPUT"
+          echo "Image will be built as: ghcr.io/$ACTOR_LOWER/spectrum-knx-addon"
 
       - name: Read Add-on version from config.yaml
         id: addon_version
