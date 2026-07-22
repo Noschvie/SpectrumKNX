@@ -1,96 +1,131 @@
-# Spectrum KNX
+# Spectrum KNX — API Kurz‑Dokumentation
 
-<p align="center">
-  <img src="frontend/public/logo.svg" alt="Spectrum KNX Logo" width="120" />
-</p>
+Diese Datei fasst die im Backend registrierten REST‑ und WebSocket‑Endpunkte zusammen. Sie wurde automatisch aus dem Code (backend/api.py) erstellt — prüfe bitte lokal auf Vollständigkeit und passe Beispiele nach Bedarf an.
 
-<p align="center">
-  <em>An elegant, high-performance bus traffic monitor and visualizer for KNX Home Automation.</em>
-</p>
+Quelle: backend/api.py
+(Generiert aus dem Backend-Code; prüfe bitte auf Vollständigkeit)
 
-![Spectrum KNX Dashboard](assets/dashboard.png)
+Hinweis
+- Diese Dokumentation basiert auf dem API‑Router in backend/api.py. Sie beschreibt die registrierten REST‑ und WebSocket‑Routen, ihre Parameter und typische Antworten. Fehlerantworten enthalten in der Regel das Feld `detail` (FastAPI).
+- Zeitstempel sind ISO8601 (UTC). Die meisten POST/GET-Antworten sind JSON; Uploads nutzen multipart/form-data.
+- Endpoints, die Änderungen am KNX‑Bus auslösen (Senden/Read), prüfen Laufzeit‑Berechtigungen (READ_ONLY, ALLOW_WRITE) und den Verbindungsstatus.
 
-Spectrum KNX is a dedicated tool to record, store, search, and visualize KNX bus telegrams indefinitely. Built for speed and reliability, it supports both a PostgreSQL backend for long-term time-series storage (the TimescaleDB extension is optional — used automatically for hypertable partitioning and native compression when available) and a lightweight SQLite backend for simple setups — paired with a premium, real-time React web interface.
+Basis
+- Base path: /api
+- WebSocket path: /ws/telegrams
 
-## 📺 Demo in Action
+WebSocket — Live‑Feed
+- Endpoint: ws://<host>/ws/telegrams (wss:// bei https)
+- Verhalten:
+  - Beim Verbinden sendet der Server eine initiale Nachricht vom Typ `connection_state` (connected/disconnected + timestamp).
+  - Clients können Filter als JSON senden; der Server akzeptiert JSON‑Objekte und aktualisiert die Filter.
+  - Beispiel (JS):
 
-![Spectrum KNX Demo](assets/demo.webp)
+    const ws = new WebSocket("ws://localhost:8765/ws/telegrams");
+    ws.onmessage = (e) => console.log(JSON.parse(e.data));
+    // Filtersenden (z. B. nur GAs A und B)
+    ws.send(JSON.stringify({ target_address: "1/2/3,1/2/4" }));
 
-## 🚀 Features
+REST‑Endpoints (Kurzliste)
+- GET /api/version
+  - Liefert die Backend‑Version.
+  - Response: { "version": "..." }
 
-- **Live Group Monitor:** Monitor bus load, traffic rate, and instantaneous payloads in real-time.
-- **Historical Analysis:** Search millions of past telegrams instantly with powerful backend query engines.
-- **Time-Delta Context:** Automatically capture the events "before and after" a filtered event to debug logic faults.
-- **Data Rendering:** Dynamically graph numerical readouts over time, grouped by physical unit types.
-- **Device Status View:** Browse the ETS building structure and open any device to see all its communication objects with live values — KNX-Lens-style diagnostics in the browser.
-- **Shareable Charts:** Copy a link to any visualization (filters, targets, time window) to bookmark it — or add `&embed=1` and drop it into a Home Assistant dashboard as a self-updating chart.
-- **Zero Loss:** Pause the live feed without dropping packets—everything queues silently in the background buffer until you resume.
-- **Database Maintenance:** Inspect database size, telegram count and covered time range; purge old telegrams with a dry-run preview and reclaim the freed disk space—right from the UI.
-- **Home Assistant Companion Mode:** Run the analyzer directly on Home Assistant's own KNX telegram history—no second bus connection, no separate database.
+- GET /api/update
+  - Liefert Update‑Check / Release‑Infos.
+  - Response: { enabled, current, latest, update_available, ... }
 
-## 🐳 Quick Start (Docker Compose)
+- GET /api/telegrams
+  - History / Suche (absteigend nach Zeit).
+  - Query-Parameter:
+    - limit, offset
+    - source_address (komma-separiert)
+    - target_address (komma-separiert)
+    - telegram_type (komma; UI: Write,Read,Response)
+    - dpt_main (z. B. "5" oder "5.001", komma-separiert)
+    - start_time, end_time (ISO datetime)
+    - delta_before_ms, delta_after_ms
+  - Response: { "telegrams": [...], "metadata": { total_count, limit, offset, limit_reached } }
 
-The easiest way to run Spectrum KNX is with Docker Compose. This automatically provisions the TimescaleDB database alongside the KNX Tracker daemon.
+- GET /api/telegrams/last
+  - Letztes Telegramm pro GA (aggregation). Optional: target_address filter.
+  - Response: { "telegrams": [...] }
 
-1. Copy the example environment file: `cp .env_example .env`
-2. Set your `KNX_PASSWORD`, `KNX_PROJECT_PATH` and `KNX_GATEWAY_IP` in `.env`.
-3. Run the stack:
+- GET /api/filter-options
+  - Liefert Listen für die UI: sources, targets, types, dpts, ga_group_names, pa_line_names.
 
-   **Development (Live Code):**
-   ```bash
-   docker-compose up -d
-   ```
+- GET /api/statistics
+  - Aggregierte Zählstatistiken: { total, by_ga, by_pa }
 
-   **Production (Pre-built image):**
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-   ```
+- GET /api/database/info
+  - DB‑Statistiken & Fähigkeiten (size_bytes, telegram_count, retention_days, supports_optimize, read_only, ...)
 
-4. Access the web interface at `http://localhost:8765` (or `http://localhost:5173` in Dev mode).
+- POST /api/database/purge
+  - Löschen alter oder aller Telegramme; unterstützt dry_run.
+  - Body: { "older_than": "ISO datetime" | null, "purge_all": bool, "dry_run": bool }
+  - Response: { "deleted": N, "dry_run": bool }
 
-   > The listen port defaults to `8765`. Set `BIND_PORT` (and optionally
-   > `BIND_HOST`) in your `.env` if it clashes with another service.
+- POST /api/database/optimize
+  - DB‑Optimierung / Reclaim space.
+  - Response: { "size_bytes_before": N, "size_bytes_after": M }
 
-## 📦 Debian Package & Windows
+- GET /api/project
+  - Geladenes KNX‑Projekt (group_addresses, devices) oder Status no_project_loaded.
 
-No Docker needed — both packages run Spectrum KNX with a local SQLite database
-(no PostgreSQL) and are attached to every [GitHub release](https://github.com/martinhoefling/SpectrumKNX/releases):
+- GET /api/project/status
+  - Status der Upload/Projekt‑Funktion (upload_writable, project_loaded, upload_required).
 
-- **Debian 13+ / compatible (amd64, arm64):** `sudo apt install ./spectrum-knx_<version>_<arch>.deb`,
-  configure `/etc/spectrum-knx/spectrum-knx.env`, then `sudo systemctl restart spectrum-knx`.
-  Web UI on port 8765.
-- **Windows (x64):** unzip `spectrum-knx-<version>-windows-x64.zip`, run
-  `spectrum-knx.exe` — the browser opens automatically; settings live in the
-  `.env` file created next to the exe.
+- POST /api/project/upload
+  - Upload einer .knxproj + password (multipart/form-data). Triggert Reload.
+  - Response: { "status": "ok", "message": "Project loaded successfully" } oder HTTP Fehler.
 
-See [PACKAGING.md](PACKAGING.md) for details and [DEPLOYMENT.md](DEPLOYMENT.md)
-for configuration.
+- GET /api/server/config
+  - Effektive Serverkonfiguration (Passwörter maskiert).
 
-## 🏠 Home Assistant
+- GET /api/knxkeys/status
+  - Status des knxkeys Upload‑Features.
 
-Two add-ons cover the two ways to run Spectrum KNX inside Home Assistant
-(add this repository URL in *Settings → Add-ons → Add-on Store → Repositories*):
+- POST /api/knxkeys/upload
+  - Upload einer .knxkeys Datei + password; schreibt Datei und reconnect.
 
-| | **Spectrum KNX** (standalone) | **Spectrum KNX (HA Companion)** |
-|---|---|---|
-| Bus connection | Own tunnel/routing connection to your KNX gateway | None — uses what HA already receives |
-| Database | Own PostgreSQL (TimescaleDB optional) or SQLite | Reads HA's KNX telegram database (read-only) |
-| Live telegrams | Directly from the bus | Streamed from HA's websocket API |
-| Retention & cleanup | Managed in Spectrum KNX (Database Maintenance screen) | Managed by Home Assistant |
-| Use when… | You want an independent, full-featured recorder | You use HA's KNX integration and want its history analyzed without duplicating anything |
+- POST /api/knx/send
+  - Senden eines GroupValueWrite/Response an die GA (nur wenn Writes erlaubt).
+  - Body: { "address": "1/2/3", "payload": Any, "dpt": "5.001" | null, "response": bool }
+  - Response: { "status": "sent" }
+  - Fehler: 403 (disabled), 409 (not connected), 400 (invalid payload/address)
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for installation and configuration of both.
+- POST /api/knx/read
+  - Sendet GroupValueRead an Adresse.
+  - Body: { "address": "1/2/3" }
+  - Response: { "status": "sent" }
 
-### Detailed Guides
-See [DEVELOPMENT.md](DEVELOPMENT.md) for local setup, [DEPLOYMENT.md](DEPLOYMENT.md) for production configuration, and the [Kubernetes templates](kubernetes/README.md) for cluster deployment.
+- POST /api/knx/send/scheduled
+  - Startet verzögertes / zyklisches Senden (ein Job gleichzeitig).
+  - Body: { address, payload, dpt, response, delay_seconds, interval_seconds }
+  - Response: Job‑Dict (state, id, next_send_at, ...)
 
-## 🛠 Tech Stack
-- **Backend:** Python 3.12+, FastAPI, `xknx`, WebSocket Streaming
-- **Database:** PostgreSQL (with optional TimescaleDB acceleration), or SQLite (via `aiosqlite`)
-- **Frontend:** React, TypeScript, Vite, TanStack Table, uPlot
+- GET /api/knx/send/scheduled/status
+- POST /api/knx/send/scheduled/cancel
 
-## 🤝 Contributing
-Interested in building out new visualization blocks or analytical filters? See our [CONTRIBUTING.md](CONTRIBUTING.md) guide!
+- GET /api/import/status
+  - Status des Telegram‑Importjobs (gibt read_only zurück).
 
-## 📜 License
-Licensed under the GNU General Public License v3.0 (GPLv3). See [LICENSE](LICENSE) for details.
+- POST /api/import
+  - Upload eines Telegram-Logs (.xml oder .zip) und Start eines Hintergrundimports.
+
+- POST /api/import/cancel
+
+- GET /api/export
+  - Streams matching telegrams als ETS6 XML (StreamingResponse).
+  - Query: source_address, target_address, telegram_type, start_time, end_time, limit
+
+Fehlercodes (typisch)
+- 400: Validation / Bad request
+- 403: Forbidden (z. B. read-only, upload disabled)
+- 404: Not found (z. B. cancel ohne Job)
+- 409: Conflict (z. B. not connected, job exists)
+- Fehlerantworten enthalten meist { "detail": "..." }
+
+Nächste Schritte (nach Commit)
+- Auf Wunsch ergänze ich die README mit vollständigen Response‑Schemas (z. B. Struktur eines Telegram-Objekts) und Beispiel‑Payloads (cURL).  
+- Alternativ kann ich eine OpenAPI‑YAML erzeugen (für Swagger / ReDoc).
