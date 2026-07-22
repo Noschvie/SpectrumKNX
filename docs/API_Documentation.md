@@ -1,12 +1,12 @@
 # Spectrum KNX — API Kurz‑Dokumentation
 
-Diese Datei fasst die im Backend registrierten REST‑ und WebSocket‑Endpunkte zusammen. Sie wurde automatisch aus dem Code (backend/api.py) erstellt — prüfe bitte lokal auf Vollständigkeit und passe Beispiele nach Bedarf an.
+Diese Datei fasst die im Backend registrierten REST‑ und WebSocket‑Endpunkte zusammen. Sie wurde automatisch aus dem Code (backend/api.py) erstellt — prüfe bitte lokal auf Vollständigkeit und Korrektheit.
 
 Quelle: backend/api.py
 (Generiert aus dem Backend-Code; prüfe bitte auf Vollständigkeit)
 
 Hinweis
-- Diese Dokumentation basiert auf dem API‑Router in backend/api.py. Sie beschreibt die registrierten REST‑ und WebSocket‑Routen, ihre Parameter und typische Antworten. Fehlerantworten enthalten in der Regel das Feld `detail` (FastAPI).
+- Diese Dokumentation basiert auf dem API‑Router in backend/api.py. Sie beschreibt die registrierten REST‑ und WebSocket‑Routen, ihre Parameter und typische Antworten. Fehlerantworten enthalten ein `detail` Feld mit Fehlermeldung.
 - Zeitstempel sind ISO8601 (UTC). Die meisten POST/GET-Antworten sind JSON; Uploads nutzen multipart/form-data.
 - Endpoints, die Änderungen am KNX‑Bus auslösen (Senden/Read), prüfen Laufzeit‑Berechtigungen (READ_ONLY, ALLOW_WRITE) und den Verbindungsstatus.
 
@@ -21,6 +21,8 @@ Inhalt
 - Response‑Schemas
   - Telegram Objekt (aus /api/telegrams)
   - KnxSend Request / Response (aus /api/knx/send)
+  - Projekt Objekt (aus /api/project)
+  - Import/Export Responses
 
 WebSocket — Live‑Feed
 - Endpoint: ws://<host>/ws/telegrams (wss:// bei https)
@@ -29,10 +31,12 @@ WebSocket — Live‑Feed
   - Clients können Filter als JSON senden; der Server akzeptiert JSON‑Objekte und aktualisiert die Filter.
   - Beispiel (JS):
 
+    ```javascript
     const ws = new WebSocket("ws://localhost:8765/ws/telegrams");
     ws.onmessage = (e) => console.log(JSON.parse(e.data));
     // Filtersenden (z. B. nur GAs A und B)
     ws.send(JSON.stringify({ target_address: "1/2/3,1/2/4" }));
+    ```
 
 REST‑Endpoints (Kurzliste)
 - GET /api/version
@@ -68,12 +72,23 @@ REST‑Endpoints (Kurzliste)
   - DB‑Optimierung / Reclaim space.
   - Response: { "size_bytes_before": N, "size_bytes_after": M }
 
+- POST /api/database/purge
+  - Löscht ältere oder alle Telegramme; unterstützt `dry_run` zur Voransicht.
+  - Body: { "older_than": "ISO datetime" | null, "purge_all": bool, "dry_run": bool }
+  - Response: { "deleted": <number>, "dry_run": <bool> }
+  - Fehler: 403 Forbidden (wenn read-only)
+
 - GET /api/project/status
   - Status der Upload/Projekt‑Funktion (upload_writable, project_loaded, upload_required).
 
+- GET /api/project
+  - Liefert das aktuell geladene KNX‑Projekt (group_addresses, devices) oder Status `no_project_loaded`.
+  - Response: JSON‑Objekt mit `project_loaded` (bool) und optional `group_addresses` / `devices` Arrays
+
 - POST /api/project/upload
   - Upload einer .knxproj + password (multipart/form-data). Triggert Reload.
-  - Response: { "status": "ok", "message": "Project loaded successfully" } oder HTTP Fehler.
+  - Request: multipart/form-data mit `file` (die .knxproj) und `password` (Form‑Field, optional)
+  - Response: { "status": "ok", "message": "Project loaded successfully" } oder HTTP Fehler (400/403)
 
 - GET /api/server/config
   - Effektive Serverkonfiguration (Passwörter maskiert).
@@ -101,19 +116,38 @@ REST‑Endpoints (Kurzliste)
   - Response: Job‑Dict (state, id, next_send_at, ...)
 
 - GET /api/knx/send/scheduled/status
+  - Status des aktuellen Sendejobs
+
 - POST /api/knx/send/scheduled/cancel
+  - Aktuellen Sendjob abbrechen
+
+- POST /api/import
+  - Upload eines Telegram‑Logs (.xml oder .zip mit .xml) und Start eines Hintergrund‑Imports.
+  - Request: multipart/form-data mit `file=@telegrams.xml`
+  - Response: Job‑Info (z. B. { "job_id": "...", "state": "running" })
+  - Fehler: 403 (in read-only mode)
 
 - GET /api/import/status
   - Status des Telegram‑Importjobs (gibt read_only zurück).
 
 - POST /api/import/cancel
+  - Bricht den laufenden Importjob ab.
+
+- GET /api/export
+  - Streamt passende Telegramme als ETS6-kompatible CommunicationLog XML (StreamingResponse).
+  - Query-Parameter: `source_address`, `target_address`, `telegram_type`, `start_time`, `end_time`, `limit`
+  - Response: XML-Datei als Attachment (Content-Disposition: attachment)
+
+- GET /api/update
+  - Liefert Informationen zu verfügbaren Releases und Metadaten (Update‑Popup).
+  - Response: Objekt mit `enabled`, `current`, `latest`, `update_available`, `html_url`, `releases`
 
 Fehlercodes (typisch)
-- 400: Validation / Bad request
-- 403: Forbidden (z. B. read-only, upload disabled)
-- 404: Not found (z. B. cancel ohne Job)
-- 409: Conflict (z. B. not connected, job exists)
-- Fehlerantworten enthalten meist { "detail": "..." }
+- 400: Validation / Bad request (z. B. ungültige Adresse, Payload-Fehler)
+- 403: Forbidden (z. B. read-only, upload disabled, Writes deaktiviert)
+- 404: Not found (z. B. cancel ohne aktiven Job)
+- 409: Conflict (z. B. not connected to KNX bus, Job existiert bereits)
+- Fehlerantworten enthalten: { "detail": "Fehlermeldung" }
 
 ---
 
@@ -145,6 +179,7 @@ Felder (aus Backend‑Serializer _build_telegram_response):
 
 Beispiel (ein Telegram‑Objekt):
 
+```json
 {
   "timestamp": "2026-07-22T09:12:34.123456Z",
   "source_address": "1.1.10",
@@ -164,6 +199,7 @@ Beispiel (ein Telegram‑Objekt):
   "value_formatted": "42 %",
   "raw_hex": "0x0F3A"
 }
+```
 
 Hinweis: /api/telegrams liefert ein Array dieser Objekte unter dem Key "telegrams"; zusätzlich wird ein metadata‑Objekt mit total_count und limit_reached zurückgegeben.
 
@@ -183,9 +219,11 @@ Antwort (bei Erfolg)
 
 Beispiel cURL (Boolean):
 
+```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{"address":"1/2/3","payload":true,"dpt":"1.001","response":false}' \
   http://localhost:8765/api/knx/send
+```
 
 Mögliche Fehlerantworten (FastAPI HTTPException)
 - 400 Bad Request — bei ConversionError / invalid address / payload
@@ -197,58 +235,333 @@ Mögliche Fehlerantworten (FastAPI HTTPException)
 
 ---
 
-3 Endpoints, die derzeit nicht weiter betrachtet werden
+3) Projekt Objekt (GET /api/project)
 
-Die folgenden Endpoints sind vorhanden, werden aber in dieser Version nicht weiter detailliert (sie sind für die aktuelle Aufgabenstellung / Priorisierung nicht relevant). Sie werden separat gelistet, damit die Hauptdokumentation fokussiert bleibt.
+Response bei geladenem Projekt:
+```json
+{
+  "project_loaded": true,
+  "group_addresses": [
+    {
+      "address": "1/2/3",
+      "name": "Lighting Group",
+      "dpt_main": 5,
+      "dpt_sub": 1
+    }
+  ],
+  "devices": [
+    {
+      "physical_address": "1.1.10",
+      "name": "Living Room Sensor",
+      "product_name": "KNX Device"
+    }
+  ]
+}
+```
 
-- GET /api/export
-  - Zweck: Streamt passende Telegramme als ETS6-kompatible CommunicationLog XML (StreamingResponse).
-  - Wichtige Query‑Parameter: `source_address`, `target_address`, `telegram_type`, `start_time`, `end_time`, `limit`
-  - Typische Nutzung: Download großer Exportdateien; Response ist ein XML‑Attachment (Content‑Disposition).
-  - Kurzes Beispiel:
-    ```bash
-    curl -L "http://localhost:8765/api/export?start_time=2025-01-01T00:00:00Z&end_time=2025-01-02T00:00:00Z" -o export.xml
-    ```
+Response bei keinem Projekt:
+```json
+{
+  "project_loaded": false,
+  "message": "no_project_loaded"
+}
+```
 
-- POST /api/project/upload
-  - Zweck: Upload einer ETS `.knxproj` Datei (multipart/form-data) plus optionales Passwort; speichert Projekt und triggert ein Reload, damit Filter / Namen verfügbar sind.
-  - Request: multipart/form-data mit `file` (die .knxproj) und `password` (Form‑Field, optional)
-  - Mögliche Antworten:
-    - 200 OK: `{ "status": "ok", "message": "Project loaded successfully" }`
-    - 400 / 403: Fehler bei Validierung oder Schreibrechten
-  - Kurzes Beispiel:
-    ```bash
-    curl -F "file=@myproject.knxproj" -F "password=secret" http://localhost:8765/api/project/upload
-    ```
+---
 
-- POST /api/database/purge
-  - Zweck: Löschen älterer Telegramme oder aller Telegramme; unterstützt `dry_run` zur Voransicht.
-  - Request (JSON):
-    - `{ "older_than": "ISO datetime" | null, "purge_all": bool, "dry_run": bool }`
-  - Response: `{ "deleted": <number>, "dry_run": <bool> }`
-  - Hinweise: Endpoint prüft, ob der Store nicht read-only ist; `purge_all` löscht komplett.
-  - Kurzes Beispiel:
-    ```bash
-    curl -X POST -H "Content-Type: application/json" \
-      -d '{"older_than":"2025-01-01T00:00:00Z","dry_run":true}' \
-      http://localhost:8765/api/database/purge
-    ```
+4) Datenbankoptimierung Response (POST /api/database/optimize)
 
-- GET /api/update
-  - Zweck: Liefert Informationen zu verfügbaren Releases und Metadaten (Update‑Popup).
-  - Typische Antwort: Objekt mit `enabled`, `current`, `latest`, `update_available`, `html_url`, `releases`.
-  - Kurzes Beispiel:
-    ```bash
-    curl http://localhost:8765/api/update
-    ```
+Response nach erfolgreicher Optimierung:
+```json
+{
+  "size_bytes_before": 10485760,
+  "size_bytes_after": 8388608,
+  "space_freed_bytes": 2097152
+}
+```
 
-- GET /api/project
-  - Zweck: Liefert das aktuell geladene KNX‑Projekt (group_addresses, devices) oder einen Status `no_project_loaded`.
-  - Typische Antwort: JSON‑Objekt mit `project_loaded` und ggf. `group_addresses`/`devices`.
+Fehler: 403 Forbidden (wenn read-only mode)
 
-- POST /api/import
-  - Zweck: Upload eines Telegram‑Logs (.xml oder .zip mit .xml) und Start eines Hintergrund‑Imports.
-  - Request: multipart/form-data mit `file=@telegrams.xml`.
-  - Response: Job‑Info (z. B. { "job_id": "...", "state": "running" }) oder Fehler (403 in read-only).
+---
 
-Hinweis: Wenn du möchtest, schreibe ich für diese Endpoints später vollständige Response‑Schemas (inkl. Fehlerbeispiele) und erweitere die Dokumentation um konkrete Beispiel‑Antworten und JSON‑Schemas.
+5) Datenbank Purge Response (POST /api/database/purge)
+
+Request Body:
+```json
+{
+  "older_than": "2025-01-01T00:00:00Z",
+  "purge_all": false,
+  "dry_run": false
+}
+```
+
+Response:
+```json
+{
+  "deleted": 1250,
+  "dry_run": false,
+  "deleted_from_timestamp": "2025-01-01T00:00:00Z"
+}
+```
+
+Dry-run Beispiel (prüft ohne zu löschen):
+```json
+{
+  "deleted": 1250,
+  "dry_run": true,
+  "message": "This is a dry run. 1250 telegrams would be deleted."
+}
+```
+
+Fehler: 403 Forbidden (wenn read-only mode)
+
+---
+
+6) Import Response (POST /api/import)
+
+Response bei erfolgreicher Upload:
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "state": "running",
+  "filename": "telegrams.xml",
+  "file_size_bytes": 5242880,
+  "progress": 0,
+  "message": "Import started"
+}
+```
+
+Import Status Response (GET /api/import/status):
+```json
+{
+  "state": "running",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "progress": 35,
+  "telegrams_imported": 3500,
+  "total_telegrams": 10000,
+  "read_only": false,
+  "start_time": "2026-07-22T09:00:00Z",
+  "elapsed_seconds": 125
+}
+```
+
+Fehler: 403 Forbidden (wenn read-only mode), 404 Not Found (kein aktiver Import)
+
+---
+
+7) Export Response (GET /api/export)
+
+Query-Parameter Beispiel:
+```bash
+GET /api/export?start_time=2025-01-01T00:00:00Z&end_time=2025-01-02T00:00:00Z&target_address=1/2/3&limit=10000
+```
+
+Response: XML-Stream (ETS6 CommunicationLog Format)
+- HTTP Header: Content-Disposition: attachment; filename=telegrams.xml
+- Content-Type: application/xml
+- Body: ETS6-kompatibles XML‑Format mit allen gefilterten Telegrammen
+
+Beispiel Export-Datei (vereinfacht):
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<CommunicationLog>
+  <Telegrams>
+    <Telegram>
+      <Timestamp>2026-07-22T09:12:34.123456Z</Timestamp>
+      <SourceAddress>1.1.10</SourceAddress>
+      <TargetAddress>1/2/3</TargetAddress>
+      <GroupValueWrite />
+      <Data>0F3A</Data>
+    </Telegram>
+  </Telegrams>
+</CommunicationLog>
+```
+
+Fehler: 400 Bad Request (ungültige Parameter)
+
+---
+
+8) Update Response (GET /api/update)
+
+Response Struktur:
+```json
+{
+  "enabled": true,
+  "current_version": "1.2.3",
+  "latest_version": "1.3.0",
+  "update_available": true,
+  "html_url": "https://github.com/Noschvie/SpectrumKNX/releases/tag/v1.3.0",
+  "releases": [
+    {
+      "tag_name": "v1.3.0",
+      "name": "Version 1.3.0",
+      "body": "Release notes...",
+      "created_at": "2026-07-20T12:00:00Z",
+      "assets": [
+        {
+          "name": "spectrumknx-1.3.0.zip",
+          "download_url": "https://github.com/.../releases/download/v1.3.0/spectrumknx-1.3.0.zip"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+9) Filter Options Response (GET /api/filter-options)
+
+Response:
+```json
+{
+  "sources": [
+    { "address": "1.1.10", "name": "Living Room Sensor" },
+    { "address": "1.1.20", "name": "Bedroom Sensor" }
+  ],
+  "targets": [
+    { "address": "1/2/3", "name": "Lighting Group" },
+    { "address": "1/2/4", "name": "Temperature Group" }
+  ],
+  "types": ["Write", "Read", "Response"],
+  "dpts": [
+    { "main": 1, "sub": 1, "name": "1.001 - Boolean" },
+    { "main": 5, "sub": 1, "name": "5.001 - Percent" }
+  ],
+  "ga_group_names": ["Lighting", "Temperature", "Security"],
+  "pa_line_names": ["Area 1", "Area 2", "Area 3"]
+}
+```
+
+---
+
+10) Statistics Response (GET /api/statistics)
+
+Response:
+```json
+{
+  "total": 250000,
+  "by_ga": {
+    "1/2/3": 5420,
+    "1/2/4": 3820,
+    "1/2/5": 2150
+  },
+  "by_pa": {
+    "1.1.10": 8500,
+    "1.1.20": 6200,
+    "1.1.30": 4500
+  },
+  "by_type": {
+    "Write": 150000,
+    "Read": 75000,
+    "Response": 25000
+  }
+}
+```
+
+---
+
+11) Database Info Response (GET /api/database/info)
+
+Response:
+```json
+{
+  "size_bytes": 104857600,
+  "telegram_count": 250000,
+  "retention_days": 30,
+  "supports_optimize": true,
+  "read_only": false,
+  "last_optimized": "2026-07-20T15:30:00Z",
+  "database_type": "SQLite",
+  "version": "3.x.x"
+}
+```
+
+---
+
+CURL Beispiele für häufige Operationen
+
+**1. Letzte Telegramme abrufen:**
+```bash
+curl "http://localhost:8765/api/telegrams?limit=50&offset=0"
+```
+
+**2. Telegramme in Zeitbereich filtern:**
+```bash
+curl "http://localhost:8765/api/telegrams?start_time=2026-07-22T00:00:00Z&end_time=2026-07-22T23:59:59Z"
+```
+
+**3. Wert senden:**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"address":"1/2/3","payload":42,"dpt":"5.001","response":false}' \
+  http://localhost:8765/api/knx/send
+```
+
+**4. Leseanfrage:**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"address":"1/2/3"}' \
+  http://localhost:8765/api/knx/read
+```
+
+**5. Geplantes Senden (mit Verzögerung):**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"address":"1/2/3","payload":true,"dpt":"1.001","delay_seconds":5}' \
+  http://localhost:8765/api/knx/send/scheduled
+```
+
+**6. Projekt hochladen:**
+```bash
+curl -F "file=@myproject.knxproj" -F "password=secret" \
+  http://localhost:8765/api/project/upload
+```
+
+**7. Telegramme exportieren:**
+```bash
+curl -L "http://localhost:8765/api/export?start_time=2025-01-01T00:00:00Z&end_time=2025-01-02T00:00:00Z" \
+  -o telegrams.xml
+```
+
+**8. Telegramme importieren:**
+```bash
+curl -F "file=@telegrams.xml" \
+  http://localhost:8765/api/import
+```
+
+**9. Datenbank-Informationen:**
+```bash
+curl http://localhost:8765/api/database/info
+```
+
+**10. Datenbank optimieren:**
+```bash
+curl -X POST http://localhost:8765/api/database/optimize
+```
+
+**11. Alte Telegramme löschen (dry-run):**
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"older_than":"2025-01-01T00:00:00Z","dry_run":true}' \
+  http://localhost:8765/api/database/purge
+```
+
+**12. WebSocket verbinden (JavaScript):**
+```javascript
+const ws = new WebSocket("ws://localhost:8765/ws/telegrams");
+ws.onopen = () => console.log("Connected to WebSocket");
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Received telegram:", data);
+};
+ws.onerror = (error) => console.error("WebSocket error:", error);
+ws.onclose = () => console.log("WebSocket closed");
+```
+
+---
+
+**Hinweise zur Dokumentation:**
+- Diese Dokumentation wird regelmäßig aktualisiert basierend auf dem Code in `backend/api.py`.
+- Für die neueste API-Version und detailliertere Implementation Details siehe die Backend-Quelle.
+- Bei Fragen oder Fehlern in der Dokumentation bitte ein Issue im Repository erstellen.
