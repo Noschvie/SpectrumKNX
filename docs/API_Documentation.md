@@ -14,6 +14,14 @@ Basis
 - Base path: /api
 - WebSocket path: /ws/telegrams
 
+Inhalt
+- Übersicht der Endpoints
+- WebSocket — Live‑Feed
+- REST‑Endpoints (Kurzliste)
+- Response‑Schemas
+  - Telegram Objekt (aus /api/telegrams)
+  - KnxSend Request / Response (aus /api/knx/send)
+
 WebSocket — Live‑Feed
 - Endpoint: ws://<host>/ws/telegrams (wss:// bei https)
 - Verhalten:
@@ -126,6 +134,93 @@ Fehlercodes (typisch)
 - 409: Conflict (z. B. not connected, job exists)
 - Fehlerantworten enthalten meist { "detail": "..." }
 
-Nächste Schritte (nach Commit)
-- Auf Wunsch ergänze ich die README mit vollständigen Response‑Schemas (z. B. Struktur eines Telegram-Objekts) und Beispiel‑Payloads (cURL).  
-- Alternativ kann ich eine OpenAPI‑YAML erzeugen (für Swagger / ReDoc).
+---
+
+Response‑Schemas
+
+1) Telegram Objekt (wie von /api/telegrams und /api/telegrams/last zurückgegeben)
+
+Bezeichnung: Telegram
+Typ: JSON Objekt
+
+Felder (aus Backend‑Serializer _build_telegram_response):
+- timestamp (string, ISO8601) — Zeitstempel des Telegramms, z. B. "2026-07-22T09:12:34.123456Z"
+- source_address (string) — Physikalische Absenderadresse (Individual Address), z. B. "1.1.10"
+- target_address (string) — Zieladresse (Group Address), z. B. "1/2/3"
+- direction (string) — Richtung (wenn relevant)
+- telegram_type (string) — Technischer Typ, z. B. "GroupValueWrite"
+- dpt_main (int|null) — Haupt‑DPT (z. B. 5)
+- dpt_sub (int|null) — DPT‑Subtyp (z. B. 1)
+- value_numeric (number|null) — Numerischer Wert (falls decodiert)
+- value_json (any|null) — Strukturierter Payload (JSON) für komplexe DPTs
+- raw_data (string|null) — Hex‑String der Rohdaten (ohne 0x), z. B. "0F3A..."
+- source_name (string|null) — Name aus Projekt (oder null)
+- target_name (string|null) — Name aus Projekt (oder null)
+- simplified_type (string) — Kurztyp (UI‑friendly), z. B. "Write"/"Read"/"Response"
+- dpt_name (string|null) — Menschlich lesbarer DPT‑Name (z. B. "5.xxx - Percent")
+- unit (string|null) — Einheit für value_formatted (z. B. "%")
+- value_formatted (string|null) — Formatiertes Anzeige‑Feld, bevorzugte Textdarstellung
+- raw_hex (string|null) — raw_data mit optionaler 0x‑Präfix, z. B. "0x0F3A"
+
+Beispiel (ein Telegram‑Objekt):
+
+{
+  "timestamp": "2026-07-22T09:12:34.123456Z",
+  "source_address": "1.1.10",
+  "target_address": "1/2/3",
+  "direction": "inbound",
+  "telegram_type": "GroupValueWrite",
+  "dpt_main": 5,
+  "dpt_sub": 1,
+  "value_numeric": 42,
+  "value_json": null,
+  "raw_data": "0F3A",
+  "source_name": "Living Room Sensor",
+  "target_name": "Lighting Group",
+  "simplified_type": "Write",
+  "dpt_name": "5.001 - Percent",
+  "unit": "%",
+  "value_formatted": "42 %",
+  "raw_hex": "0x0F3A"
+}
+
+Hinweis: /api/telegrams liefert ein Array dieser Objekte unter dem Key "telegrams"; zusätzlich wird ein metadata‑Objekt mit total_count und limit_reached zurückgegeben.
+
+---
+
+2) KnxSend Request / Response (POST /api/knx/send)
+
+Request Body (JSON) — KnxSendRequest
+- address (string) — Ziel‑GroupAddress, z. B. "1/2/3"
+- payload (boolean|number|string|object) — Decodierter Wert für den angegebenen DPT (z. B. true, 21.5, "Hello"); für undekodierte Werte kann ein Raw‑Byte‑Array erwartet werden.
+- dpt (string|null) — DPT als String im Format "main.sub", z. B. "5.001" oder null
+- response (boolean) — Wenn true wird ein Response‑Telegramm statt Write gesendet (falls unterstützt)
+
+Antwort (bei Erfolg)
+- Status: 200 OK
+- Body: { "status": "sent" }
+
+Beispiel cURL (Boolean):
+
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"address":"1/2/3","payload":true,"dpt":"1.001","response":false}' \
+  http://localhost:8765/api/knx/send
+
+Mögliche Fehlerantworten (FastAPI HTTPException)
+- 400 Bad Request — bei ConversionError / invalid address / payload
+  Beispiel: { "detail": "Invalid DPT value: ..." }
+- 403 Forbidden — wenn Bus‑Writes deaktiviert (READ_ONLY oder ALLOW_WRITE=false)
+  Beispiel: { "detail": "Sending to the KNX bus is disabled" }
+- 409 Conflict — wenn der Dienst nicht mit dem KNX‑Bus verbunden ist
+  Beispiel: { "detail": "Not connected to the KNX bus" }
+
+---
+
+Weiteres
+
+Wenn du möchtest, erweitere ich diese Datei um:
+- Vollständige JSON‑Schemas (JSON Schema Draft) für alle wichtigen Objekte
+- Beispiele / cURL‑Snippets für weitere Endpoints (/api/export, /api/project/upload, /api/database/purge)
+- Ein Inhaltsverzeichnis mit Links zu den Endpoint‑Abschnitten
+
+Sag mir bitte, ob ich JSON‑Schemas erzeugen und die Beispielabschnitte erweitern soll, und welche Endpoints Priorität haben (z. B. /api/export, /api/project/upload).
