@@ -39,10 +39,6 @@ REST‑Endpoints (Kurzliste)
   - Liefert die Backend‑Version.
   - Response: { "version": "..." }
 
-- GET /api/update
-  - Liefert Update‑Check / Release‑Infos.
-  - Response: { enabled, current, latest, update_available, ... }
-
 - GET /api/telegrams
   - History / Suche (absteigend nach Zeit).
   - Query-Parameter:
@@ -72,11 +68,12 @@ REST‑Endpoints (Kurzliste)
   - DB‑Optimierung / Reclaim space.
   - Response: { "size_bytes_before": N, "size_bytes_after": M }
 
-- GET /api/project
-  - Geladenes KNX‑Projekt (group_addresses, devices) oder Status no_project_loaded.
-
 - GET /api/project/status
   - Status der Upload/Projekt‑Funktion (upload_writable, project_loaded, upload_required).
+
+- POST /api/project/upload
+  - Upload einer .knxproj + password (multipart/form-data). Triggert Reload.
+  - Response: { "status": "ok", "message": "Project loaded successfully" } oder HTTP Fehler.
 
 - GET /api/server/config
   - Effektive Serverkonfiguration (Passwörter maskiert).
@@ -108,9 +105,6 @@ REST‑Endpoints (Kurzliste)
 
 - GET /api/import/status
   - Status des Telegram‑Importjobs (gibt read_only zurück).
-
-- POST /api/import
-  - Upload eines Telegram-Logs (.xml oder .zip) und Start eines Hintergrundimports.
 
 - POST /api/import/cancel
 
@@ -240,4 +234,21 @@ Die folgenden Endpoints sind vorhanden, werden aber in dieser Version nicht weit
       http://localhost:8765/api/database/purge
     ```
 
-Hinweis: Wenn du möchtest, schreibe ich für diese drei Endpoints später vollständige Response‑Schemas (inkl. Fehlerbeispiele) und erweitere die Dokumentation um konkrete Beispiel‑Antworten und JSON‑Schemas.
+- GET /api/update
+  - Zweck: Liefert Informationen zu verfügbaren Releases und Metadaten (Update‑Popup).
+  - Typische Antwort: Objekt mit `enabled`, `current`, `latest`, `update_available`, `html_url`, `releases`.
+  - Kurzes Beispiel:
+    ```bash
+    curl http://localhost:8765/api/update
+    ```
+
+- GET /api/project
+  - Zweck: Liefert das aktuell geladene KNX‑Projekt (group_addresses, devices) oder einen Status `no_project_loaded`.
+  - Typische Antwort: JSON‑Objekt mit `project_loaded` und ggf. `group_addresses`/`devices`.
+
+- POST /api/import
+  - Zweck: Upload eines Telegram‑Logs (.xml oder .zip mit .xml) und Start eines Hintergrund‑Imports.
+  - Request: multipart/form-data mit `file=@telegrams.xml`.
+  - Response: Job‑Info (z. B. { "job_id": "...", "state": "running" }) oder Fehler (403 in read-only).
+
+Hinweis: Wenn du möchtest, schreibe ich für diese Endpoints später vollständige Response‑Schemas (inkl. Fehlerbeispiele) und erweitere die Dokumentation um konkrete Beispiel‑Antworten und JSON‑Schemas.
